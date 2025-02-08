@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Tree Generator</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-family: sans-serif;
+      font-size: 14px;
+      z-index: 10;
+    }
+    #controls label {
+      display: block;
+      margin: 5px 0;
+    }
+    #controls input {
+      width: 60px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="controls">
+    <label>Max Depth: <input type="number" id="maxDepth" value="6" min="1" max="9"></label>
+    <label>Initial Length: <input type="number" id="initialLength" value="5" step="0.1"></label>
+    <label>Initial Thickness: <input type="number" id="initialThickness" value="0.5" step="0.1"></label>
+    <label>Branch Spread: <input type="number" id="branchSpread" value="0.6" step="0.1"></label>
+    <label>Branch Factor: <input type="number" id="branchFactor" value="3" min="1" max="5"></label>
+    <label>Branch Probability: <input type="number" id="branchProbability" value="0.8" step="0.1" min="0" max="1"></label>
+    <label>Length Decay: <input type="number" id="lengthDecay" value="0.7" step="0.1" min="0.1" max="1"></label>
+    <label>Thickness Decay: <input type="number" id="thicknessDecay" value="0.7" step="0.1" min="0.1" max="1"></label>
+    <label>Leaf Size: <input type="number" id="leafSize" value="1" step="0.1" min="0.1"></label>
+    <button id="regenTree">Generate Tree</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from './js/three.module.js';
+    import { OrbitControls } from './js/OrbitControls.js';
+
+    let scene, camera, renderer, treeGroup;
+    // Declare a global variable for controls
+    let controls;
+    init();
+    animate();
+
+    function init() {
+      // Create scene
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xa0a0a0);
+
+      // Set up camera
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 5, 15);
+      camera.lookAt(0, 0, 0);
+
+      // Renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // Add OrbitControls using the imported OrbitControls
+      controls = new OrbitControls(camera, renderer.domElement);
+
+      // Lighting
+      let ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+      scene.add(ambientLight);
+      let directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+      directionalLight.position.set(5, 15, 10);
+      scene.add(directionalLight);
+
+      // Add hemisphere light for more natural illumination
+      const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 1);
+      scene.add(hemisphereLight);
+
+      // Generate initial tree
+      treeGroup = generateTreeFromUI();
+      scene.add(treeGroup);
+
+      // Handle window resize
+      window.addEventListener('resize', onWindowResize, false);
+
+      // Button event to regenerate tree
+      document.getElementById('regenTree').addEventListener('click', () => {
+        // Remove old tree and dispose geometries/materials
+        scene.remove(treeGroup);
+        treeGroup.traverse(child => {
+          if(child.geometry) child.geometry.dispose();
+          if(child.material) child.material.dispose();
+        });
+        treeGroup = generateTreeFromUI();
+        scene.add(treeGroup);
+      });
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // Update generateBarkTexture function to create more organic patterns
+    function generateBarkTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024; // Higher resolution
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+      
+      // More detailed base pattern
+      ctx.fillStyle = '#705040';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Add detailed vertical ridges
+      const ridgeCount = 100;
+      for (let i = 0; i < ridgeCount; i++) {
+        const x = Math.random() * canvas.width;
+        const width = 3 + Math.random() * 8;
+        const hueVariation = Math.random() * 15 - 7.5;
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        
+        gradient.addColorStop(0, `hsl(${30 + hueVariation}, 35%, 25%)`);
+        gradient.addColorStop(1, `hsl(${40 + hueVariation}, 30%, 35%)`);
+        
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(x + (Math.random() - 0.5) * 20, 0);
+        ctx.bezierCurveTo(
+          x + (Math.random() - 0.5) * 30, canvas.height * 0.3,
+          x + (Math.random() - 0.5) * 30, canvas.height * 0.7,
+          x + (Math.random() - 0.5) * 20, canvas.height
+        );
+        ctx.stroke();
+      }
+
+      // Add smaller pore details
+      ctx.fillStyle = 'rgba(50,30,20,0.3)';
+      for (let i = 0; i < 500; i++) {
+        ctx.beginPath();
+        ctx.arc(
+          Math.random() * canvas.width,
+          Math.random() * canvas.height,
+          Math.random() * 3,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1, 2);
+      texture.anisotropy = 16;
+      return texture;
+    }
+
+    // Add new function for bark bump texture
+    function generateBarkBumpTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      
+      // Create vertical groove pattern
+      const imageData = ctx.createImageData(canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const idx = (y * canvas.width + x) * 4;
+          // Vertical sine wave pattern with noise
+          const vertical = Math.sin(x * 0.02) * 40 + Math.sin(x * 0.05 + y * 0.1) * 20;
+          const noise = Math.random() * 50;
+          const value = Math.min(255, Math.max(0, 150 + vertical + noise));
+          
+          data[idx] = value;
+          data[idx + 1] = value;
+          data[idx + 2] = value;
+          data[idx + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Add horizontal cracks
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      for (let i = 0; i < 50; i++) {
+        const y = Math.random() * canvas.height;
+        ctx.beginPath();
+        ctx.moveTo(Math.random() * canvas.width, y);
+        ctx.lineTo(Math.random() * canvas.width, y);
+        ctx.lineWidth = 2 + Math.random() * 3;
+        ctx.stroke();
+      }
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(2, 4);
+      return texture;
+    }
+
+    // After the generateBarkTexture function, add dynamic leaf texture generator
+    function generateLeafTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.createImageData(canvas.width, canvas.height);
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        const baseR = 20, baseG = 120, baseB = 20;
+        imgData.data[i] = baseR + Math.floor((Math.random() - 0.5) * 20);
+        imgData.data[i + 1] = baseG + Math.floor((Math.random() - 0.5) * 30);
+        imgData.data[i + 2] = baseB + Math.floor((Math.random() - 0.5) * 20);
+        imgData.data[i + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1, 1);
+      return texture;
+    }
+
+    // After the generateLeafTexture function, add the following:
+    function generateStemTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.createImageData(canvas.width, canvas.height);
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        const baseR = 180, baseG = 160, baseB = 120;
+        imgData.data[i] = baseR + Math.floor((Math.random() - 0.5) * 15);
+        imgData.data[i + 1] = baseG + Math.floor((Math.random() - 0.5) * 10);
+        imgData.data[i + 2] = baseB + Math.floor((Math.random() - 0.5) * 8);
+        imgData.data[i + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(2, 2);
+      return texture;
+    }
+
+    // In function createLeafGeometry, update the curve control points to make the leaf thinner
+    function createLeafGeometry(leafSize) {
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.quadraticCurveTo(leafSize * 0.25, leafSize * 0.8, 0, leafSize);
+      shape.quadraticCurveTo(-leafSize * 0.25, leafSize * 0.8, 0, 0);
+      return new THREE.ShapeGeometry(shape);
+    }
+
+    // Modify getTreeParameters to include leafSize
+    function getTreeParameters() {
+      return {
+        maxDepth: parseInt(document.getElementById('maxDepth').value),
+        initialLength: parseFloat(document.getElementById('initialLength').value),
+        initialThickness: parseFloat(document.getElementById('initialThickness').value),
+        branchSpread: parseFloat(document.getElementById('branchSpread').value),
+        branchFactor: parseInt(document.getElementById('branchFactor').value),
+        branchProbability: parseFloat(document.getElementById('branchProbability').value),
+        lengthDecay: parseFloat(document.getElementById('lengthDecay').value),
+        thicknessDecay: parseFloat(document.getElementById('thicknessDecay').value),
+        leafSize: parseFloat(document.getElementById('leafSize').value)
+      };
+    }
+
+    // In generateTree, update the addLeaf function for a custom leaf shape
+    function generateTree(parameters) {
+      const group = new THREE.Group();
+      const barkTexture = generateBarkTexture();
+      const bumpTexture = generateBarkBumpTexture();
+      
+      const material = new THREE.MeshStandardMaterial({ 
+        map: barkTexture,
+        bumpMap: bumpTexture,
+        displacementMap: generateBarkBumpTexture(),
+        displacementScale: 0.08,
+        bumpScale: 0.18,
+        roughness: 0.7,
+        metalness: 0.0,
+        color: 0x785444,
+        side: THREE.DoubleSide,
+        wireframe: false
+      });
+
+      // Helper function to add a leaf at a given position
+      function addLeaf(leafPos, branchPlaneNormal, branchOrigin) {
+        // Compute leaf orientation quaternion based on branchPlaneNormal and a slight random wiggle
+        const defaultNormal = new THREE.Vector3(0, 1, 0);
+        const q = new THREE.Quaternion().setFromUnitVectors(defaultNormal, branchPlaneNormal);
+        const angle = (Math.random() < 0.5 ? 1 : -1) * (Math.random() * 0.1);
+        const q2 = new THREE.Quaternion().setFromAxisAngle(branchPlaneNormal, angle);
+        q.multiply(q2);
+
+        // Initialize leafQ with original orientation
+        let leafQ = q.clone();
+
+        // Compute stem with curvature
+        const stemVector = new THREE.Vector3().subVectors(leafPos, branchOrigin);
+        const stemLength = stemVector.length();
+        if (stemLength > 0.001) {
+          // Calculate leaf forward direction from orientation
+          const leafForward = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+          
+          // Create a curved path using quadratic bezier curve
+          const midPoint = new THREE.Vector3()
+            .lerpVectors(branchOrigin, leafPos, 0.3)
+            .add(leafForward.multiplyScalar(stemLength * 0.2));
+          
+          const curve = new THREE.QuadraticBezierCurve3(
+            branchOrigin,
+            midPoint,
+            leafPos
+          );
+
+          // Calculate end tangent
+          const endTangent = curve.getTangentAt(1).normalize();
+          leafQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), endTangent);
+
+          // Create tapered stem geometry
+          const stemRadius = parameters.leafSize * 0.02;
+          const stemGeometry = new THREE.TubeGeometry(
+            curve,
+            6, // segments
+            stemRadius * 0.8, // start radius
+            8, // radial segments
+            false // closed
+          );
+          
+          const stemMaterial = new THREE.MeshStandardMaterial({ 
+            map: generateStemTexture(),
+            side: THREE.DoubleSide
+          });
+          
+          const stemMesh = new THREE.Mesh(stemGeometry, stemMaterial);
+          group.add(stemMesh);
+        }
+
+        const leafSize = parameters.leafSize;
+        const geometry = createLeafGeometry(leafSize);
+
+        const leafMaterial = new THREE.MeshStandardMaterial({ map: generateLeafTexture(), side: THREE.DoubleSide, transparent: true });
+        const leafMesh = new THREE.Mesh(geometry, leafMaterial);
+        leafMesh.position.copy(leafPos);
+        leafMesh.quaternion.copy(leafQ);  // Set quaternion directly on mesh
+        group.add(leafMesh);
+
+        // Update wind data to use the new base orientation
+        leafMesh.userData.isLeaf = true;
+        leafMesh.userData.baseQuaternion = leafQ.clone();  // Store the initial orientation
+        leafMesh.userData.windOffset = Math.random() * Math.PI * 2;
+        leafMesh.userData.windAxis = new THREE.Vector3(0, 1, 0)
+          .applyQuaternion(leafQ)
+          .cross(new THREE.Vector3(0, 0, 1).applyQuaternion(leafQ))
+          .normalize();
+      }
+
+      // Recursive function to add branches
+      function addBranch(position, direction, length, thickness, depth) {
+        // Use the current branch thickness as the parent's thickness
+        const parentThickness = thickness;
+        // Compute the thickness for child branches
+        const newThickness = thickness * parameters.thicknessDecay;
+        // Compute the intended end point of the branch (without overlap)
+        const intendedEnd = position.clone().add(direction.clone().multiplyScalar(length));
+        // The branch length is 'length'
+        const branchLength = length;
+        // Define an overlap factor (e.g., 5% of branchLength) so that segments overlap
+        const overlap = 0.05 * branchLength;
+        // Effective length of the parent's cylinder
+        const effectiveLength = branchLength + overlap;
+        // Compute the connection point for child branches: slightly offset back into the parent's branch
+        const connectionPoint = intendedEnd.clone().sub(direction.clone().multiplyScalar(overlap));
+        
+        const radialSegments = 8;
+        // Create a cylinder geometry where the bottom (after translation) is at (0,0,0) and top at (0,effectiveLength,0)
+        const branchGeometry = new THREE.CylinderGeometry(newThickness, parentThickness, effectiveLength, radialSegments);
+        // Translate the geometry so that its bottom end is at the origin
+        branchGeometry.translate(0, effectiveLength / 2, 0);
+        
+        // Create the mesh and position it at the parent's end
+        const branchMesh = new THREE.Mesh(branchGeometry, material);
+        branchMesh.position.copy(position);
+        // Orient the branchMesh so that its Y-axis aligns with the branch direction
+        branchMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+        group.add(branchMesh);
+        
+        // Compute branch plane normal for leaf placement
+        let candidate = new THREE.Vector3(0, 1, 0);
+        if (Math.abs(direction.dot(candidate)) > 0.9) {
+          candidate.set(1, 0, 0);
+        }
+        let side = new THREE.Vector3().crossVectors(direction, candidate).normalize();
+        let branchPlaneNormal = new THREE.Vector3().crossVectors(direction, side).normalize();
+        
+        // Add leaves along the branch using the intended end point for placement
+        if (depth <= 3) {
+          const fractions = [0.3, 0.6];
+          fractions.forEach(f => {
+            const posFraction = position.clone().lerp(intendedEnd, f);
+            const leafCount = Math.floor(Math.random() * 2) + 2;
+            for (let i = 0; i < leafCount; i++) {
+              const leafOffsetScalar = parameters.leafSize * (0.3 + Math.random() * 0.2);
+              const sign = Math.random() < 0.5 ? 1 : -1;
+              const offset = side.clone().multiplyScalar(leafOffsetScalar * sign)
+                .add(direction.clone().multiplyScalar((Math.random() - 0.5) * parameters.leafSize * 0.1));
+              addLeaf(posFraction.clone().add(offset), branchPlaneNormal, posFraction.clone());
+            }
+          });
+        }
+        if (depth <= 1) {
+          const leafCount = Math.floor(Math.random() * 3) + 3;
+          for (let i = 0; i < leafCount; i++) {
+            const leafOffsetScalar = parameters.leafSize * (0.3 + Math.random() * 0.2);
+            const sign = Math.random() < 0.5 ? 1 : -1;
+            const offset = side.clone().multiplyScalar(leafOffsetScalar * sign)
+              .add(direction.clone().multiplyScalar((Math.random() - 0.5) * parameters.leafSize * 0.1));
+            addLeaf(intendedEnd.clone().add(offset), branchPlaneNormal, intendedEnd.clone());
+          }
+          return;
+        }
+        
+        // Recurse to add child branches. Use the connectionPoint so the child branch overlaps the parent's cylinder
+        let childCountCandidate = Math.floor(Math.random() * parameters.branchFactor) + 1;
+        let childIndices = [];
+        for (let i = 0; i < childCountCandidate; i++) {
+          if (Math.random() < parameters.branchProbability) {
+            childIndices.push(i);
+          }
+        }
+        if (childIndices.length === 0) childIndices.push(0);
+        
+        childIndices.forEach(() => {
+          const randomOffset = new THREE.Vector3(
+            (Math.random() - 0.5) * parameters.branchSpread,
+            (Math.random() - 0.5) * parameters.branchSpread,
+            (Math.random() - 0.5) * parameters.branchSpread
+          );
+          const newDir = direction.clone().add(randomOffset).normalize();
+          const newLength = length * parameters.lengthDecay * (0.9 + Math.random() * 0.2);
+          addBranch(connectionPoint, newDir, newLength, newThickness, depth - 1);
+        });
+      }
+
+      addBranch(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0), parameters.initialLength, parameters.initialThickness, parameters.maxDepth);
+      return group;
+    }
+
+    function generateTreeFromUI() {
+      const params = getTreeParameters();
+      const tree = generateTree(params);
+      // Center the tree by calculating its bounding box
+      const box = new THREE.Box3().setFromObject(tree);
+      const center = box.getCenter(new THREE.Vector3());
+      tree.position.sub(center);
+      return tree;
+    }
+
+    // Animation loop: slowly spin the tree
+    function animate() {
+      requestAnimationFrame(animate);
+      if (treeGroup) {
+        treeGroup.rotation.y += 0.005;
+        // Apply wind animation to leaves
+        treeGroup.traverse(child => {
+          if(child.userData && child.userData.isLeaf) {
+            let time = Date.now() * 0.001;
+            let windAngle = 0.2 * Math.sin(time * 2 + child.userData.windOffset);
+            let windQuat = new THREE.Quaternion();
+            windQuat.setFromAxisAngle(child.userData.windAxis, windAngle);
+            child.quaternion.copy(child.userData.baseQuaternion).multiply(windQuat);
+          }
+        });
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html> 
